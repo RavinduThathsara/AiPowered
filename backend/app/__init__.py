@@ -1,0 +1,1 @@
+"""SignBridge backend application package."""
