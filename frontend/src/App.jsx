@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, Route, Routes } from 'react-router-dom'
 import { ArrowRight, Camera, HeartHandshake, Info, Languages, Menu, MessageCircle, Mic, ShieldCheck, Sparkles, Square, X } from 'lucide-react'
+import { addConversationMessage, createConversation, deleteConversation, getConversation, listConversations, translateSignToVoice, translateVoiceToSign } from './api'
 
-const nav = [['Home', '/'], ['Voice to Sign', '/voice-to-sign'], ['Sign to Voice', '/sign-to-voice'], ['About', '/about']]
+const nav = [['Home', '/'], ['Voice to Sign', '/voice-to-sign'], ['Sign to Voice', '/sign-to-voice'], ['History', '/history'], ['About', '/about']]
 
 function Layout() {
   const [open, setOpen] = useState(false)
-  return <div className="shell"><header><div className="container nav"><Link to="/" className="brand" onClick={() => setOpen(false)}><span className="logo"><MessageCircle size={20} /></span>SignBridge</Link><button className="menu" aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button><nav className={open ? 'mobile-nav' : ''} aria-label="Primary navigation"><ul>{nav.map(([label, to]) => <li key={to}><NavLink to={to} end={to === '/'} onClick={() => setOpen(false)}>{label}</NavLink></li>)}</ul></nav></div></header><main><Routes><Route path="/" element={<Home />} /><Route path="/voice-to-sign" element={<VoiceToSign />} /><Route path="/sign-to-voice" element={<SignToVoice />} /><Route path="/about" element={<About />} /></Routes></main><footer><div className="container footer-content"><span><HeartHandshake size={16} /> Built with accessibility at the center.</span><span>SignBridge · Phase 1 frontend demo</span></div></footer></div>
+  return <div className="shell"><header><div className="container nav"><Link to="/" className="brand" onClick={() => setOpen(false)}><span className="logo"><MessageCircle size={20} /></span>SignBridge</Link><button className="menu" aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button><nav className={open ? 'mobile-nav' : ''} aria-label="Primary navigation"><ul>{nav.map(([label, to]) => <li key={to}><NavLink to={to} end={to === '/'} onClick={() => setOpen(false)}>{label}</NavLink></li>)}</ul></nav></div></header><main><Routes><Route path="/" element={<Home />} /><Route path="/voice-to-sign" element={<VoiceToSign />} /><Route path="/sign-to-voice" element={<SignToVoice />} /><Route path="/history" element={<History />} /><Route path="/about" element={<About />} /></Routes></main><footer><div className="container footer-content"><span><HeartHandshake size={16} /> Built with accessibility at the center.</span><span>SignBridge · Phase 1 frontend demo</span></div></footer></div>
 }
 
 function Language({ value, onChange }) {
@@ -24,13 +25,116 @@ function Workspace({ mode }) {
   const voice = mode === 'voice'
   const [language, setLanguage] = useState('ASL')
   const [active, setActive] = useState(false)
+  const [input, setInput] = useState('')
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [conversationId, setConversationId] = useState(null)
+  const [saved, setSaved] = useState(false)
   const noun = voice ? 'recording' : 'camera'
-  return <div className="container page"><p className="eyebrow">{voice ? 'Voice to sign' : 'Sign to voice'}</p><h1>{voice ? 'Let your words be seen.' : 'A clearer way to be heard.'}</h1><p className="lead page-lead">{voice ? 'This workspace will connect spoken language with visual signing. For now, it is an honest, accessible preview of the experience to come.' : 'A camera-first workspace designed for a future where your signing can become text and voice. This is a frontend-only demo for now.'}</p><Language value={language} onChange={setLanguage} /><div className="workspace"><section className="panel"><h2>{voice ? 'Microphone' : 'Camera preview'}</h2><p className="muted">Controls are demo placeholders</p><div className={voice ? 'device voice' : 'device camera'}><span>{voice ? <Mic size={32} /> : <Camera size={32} />}</span><strong>{active ? `Demo ${noun} state` : voice ? 'Ready when you are' : 'Camera preview area'}</strong><small>No device permission is requested in this frontend phase.</small></div><div className="button-row"><button className="button primary" disabled={active} onClick={() => setActive(true)}>{voice ? <Mic size={17} /> : <Camera size={17} />} Start {noun}</button><button className="button secondary" disabled={!active} onClick={() => setActive(false)}><Square size={15} /> Stop {noun}</button></div></section><div className="stack"><Placeholder title={voice ? 'Recognized speech' : `${language} recognized signs`} icon={voice ? Mic : Camera} text={voice ? 'Spoken words will appear here once speech recognition is connected.' : 'Recognized sign language text will appear here once gesture recognition is connected.'} /><Placeholder title={voice ? `${language} sign output` : 'Generated voice'} icon={voice ? Info : Mic} text={voice ? 'Sign video or animation output will appear here once translation is implemented.' : 'Generated audio controls and transcript will appear here once voice generation is implemented.'} /></div></div><div className="notice" role="status"><Info size={18} /> {voice ? 'Speech recognition and sign language translation' : 'AI gesture recognition and voice generation'} are not implemented yet. This page is a demo placeholder for Phase 1.</div></div>
+  function toggleRecording() {
+    if (!voice) {
+      setActive(value => !value)
+      return
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setError('Speech recognition is not supported in this browser. You can type the spoken text instead.')
+      return
+    }
+    if (active) {
+      setActive(false)
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.lang = 'en-US'
+    recognition.onstart = () => {
+      setActive(true)
+      setError('')
+    }
+    recognition.onresult = event => {
+      const transcript = event.results[0][0].transcript
+      setInput(current => current ? `${current} ${transcript}` : transcript)
+    }
+    recognition.onerror = event => {
+      setError(`Speech recognition failed: ${event.error}. You can type the spoken text instead.`)
+    }
+    recognition.onend = () => setActive(false)
+    recognition.start()
+  }
+  async function handleTranslate() {
+    const values = voice ? input.trim() : input.split(',').map(sign => sign.trim()).filter(Boolean)
+    if ((voice && !values) || (!voice && values.length === 0)) {
+      setError(voice ? 'Enter text before translating.' : 'Enter signs separated by commas.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    setSaved(false)
+    try {
+      const translation = voice ? await translateVoiceToSign(values, language) : await translateSignToVoice(values, language)
+      setResult(translation)
+      const conversation = conversationId
+        ? { id: conversationId }
+        : await createConversation(voice ? 'Voice to Sign conversation' : 'Sign to Voice conversation', language)
+      if (!conversationId) setConversationId(conversation.id)
+      await addConversationMessage(conversation.id, 'user', voice ? values : values.join(', '))
+      await addConversationMessage(conversation.id, 'assistant', voice ? translation.sign_sequence.join(' · ') : translation.generated_text)
+      setSaved(true)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return <div className="container page"><p className="eyebrow">{voice ? 'Voice to sign' : 'Sign to voice'}</p><h1>{voice ? 'Let your words be seen.' : 'A clearer way to be heard.'}</h1><p className="lead page-lead">{voice ? 'Speak or type text to preview the voice-to-sign backend contract.' : 'Enter recognized signs to preview the sign-to-voice backend contract.'}</p><Language value={language} onChange={setLanguage} /><div className="workspace"><section className="panel"><h2>{voice ? 'Spoken input' : 'Recognized signs'}</h2><p className="muted">{voice ? 'Use your browser microphone or type until speech capture is connected.' : 'Separate signs with commas until camera recognition is connected.'}</p><textarea className="input" value={input} onChange={event => setInput(event.target.value)} placeholder={voice ? 'Hello, how are you?' : 'HELLO, HOW, ARE, YOU'} rows="4" /><div className="button-row">{voice && <button className="button secondary" onClick={toggleRecording}>{active ? 'Stop recording' : 'Start recording'}</button>}<button className="button primary" disabled={loading} onClick={handleTranslate}>{loading ? 'Translating...' : 'Translate'}</button><button className="button secondary" onClick={() => { setInput(''); setResult(null); setError(''); setSaved(false) }}>Clear</button></div>{error && <p className="error" role="alert">{error}</p>}</section><div className="stack"><Placeholder title={voice ? `${language} sign output` : 'Generated voice'} icon={voice ? Info : Mic} text={result ? voice ? result.sign_sequence.join(' · ') : result.generated_text : voice ? 'Translation output will appear here.' : 'Generated transcript will appear here.'} /><Placeholder title="Conversation history" icon={MessageCircle} text={saved ? 'Translation saved to the current conversation.' : conversationId ? 'Ready to save the next translation.' : 'A conversation will be created after the first translation.'} /></div></div><div className="notice" role="status"><Info size={18} /> Browser speech recognition is available where supported. Real sign-language recognition and AI providers are not connected yet.</div></div>
 }
 
 function Placeholder({ title, icon: Icon, text }) { return <section className="panel"><h2><span className="mini-icon"><Icon size={18} /></span>{title}</h2><div className="placeholder">{text}</div></section> }
 function VoiceToSign() { return <Workspace mode="voice" /> }
 function SignToVoice() { return <Workspace mode="sign" /> }
+function History() {
+  const [conversations, setConversations] = useState([])
+  const [selected, setSelected] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  async function loadConversations() {
+    setLoading(true)
+    setError('')
+    try {
+      setConversations(await listConversations())
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function openConversation(id) {
+    try {
+      setSelected(await getConversation(id))
+      setError('')
+    } catch (requestError) {
+      setError(requestError.message)
+    }
+  }
+
+  async function removeConversation(id) {
+    try {
+      await deleteConversation(id)
+      setConversations(items => items.filter(item => item.id !== id))
+      if (selected?.id === id) setSelected(null)
+    } catch (requestError) {
+      setError(requestError.message)
+    }
+  }
+
+  useEffect(() => { loadConversations() }, [])
+  return <div className="container page"><p className="eyebrow">Conversation history</p><h1>Your conversations, kept clear.</h1><p className="lead page-lead">Reopen saved translation sessions or remove them from local history.</p>{error && <p className="error" role="alert">{error}</p>}{loading ? <div className="panel"><p className="muted">Loading conversations...</p></div> : conversations.length === 0 ? <div className="panel"><p className="muted">No conversations saved yet. Start a translation to create one.</p></div> : <div className="history-layout"><section className="history-list">{conversations.map(conversation => <article className="history-item" key={conversation.id}><button className="history-select" onClick={() => openConversation(conversation.id)}><strong>{conversation.title}</strong><small>{conversation.sign_language} · {conversation.message_count} messages</small></button><button className="delete-button" aria-label={`Delete ${conversation.title}`} onClick={() => removeConversation(conversation.id)}>Delete</button></article>)}</section>{selected && <section className="panel transcript"><h2>{selected.title}</h2><p className="muted">{selected.sign_language} · {selected.messages.length} messages</p>{selected.messages.map(message => <div className={`message ${message.role}`} key={message.id}><small>{message.role}</small><p>{message.content}</p></div>)}</section>}</div>}</div>
+}
 function About() { return <div className="container page"><p className="eyebrow">About SignBridge</p><h1>Technology that listens, watches, and makes room.</h1><p className="lead page-lead">SignBridge is an AI-powered communication concept for Deaf and Hard of Hearing people. We are starting with a thoughtful frontend foundation for spoken language to sign and sign language to voice.</p><div className="about-grid">{[['Accessible', 'Clear contrast, visible focus states, responsive layouts, and semantic controls are part of the foundation.'], ['Human-centered', 'The experience supports communication with dignity, choice, and clarity at every step.'], ['AI-ready', 'The separated frontend foundation leaves room for future capabilities to be added responsibly.']].map(([title, text]) => <article className="card" key={title}><h3>{title}</h3><p>{text}</p></article>)}</div><div className="about-note"><ShieldCheck /><div><h2>An honest Phase 1 foundation</h2><p>The current experience deliberately does not perform speech recognition, sign translation, gesture recognition, or voice generation. Each area is clearly marked as a demo placeholder.</p></div></div></div> }
 
 export default Layout

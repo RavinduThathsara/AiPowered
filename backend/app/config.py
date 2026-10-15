@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "SignBridge API"
     app_version: str = "0.1.0"
     allowed_origins: list[str] = ["http://localhost:5173"]
+    database_url: str = "sqlite:///./signbridge.db"
 
     model_config = SettingsConfigDict(
         env_file=".env",

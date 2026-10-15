@@ -2,10 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.database import Base, engine
+from app import models
 from app.routes import router
 from app.schemas import HealthResponse
 
 settings = get_settings()
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.app_name,

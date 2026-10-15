@@ -45,6 +45,50 @@ Example request:
 This currently returns deterministic mock output and does not claim to perform
 speech recognition or sign-language translation.
 
+The reverse translation contract is:
+
+```text
+POST /api/v1/sign-to-voice
+Content-Type: application/json
+```
+
+Example request:
+
+```json
+{
+  "sign_sequence": ["HELLO", "HOW", "ARE", "YOU"],
+  "sign_language": "ASL"
+}
+```
+
+It returns mock recognized text with `audio_available: false` until real
+gesture-recognition and voice-generation providers are connected.
+
+An image upload contract is also available for future camera recognition:
+
+```text
+POST /api/v1/sign-to-voice/image
+Content-Type: multipart/form-data
+```
+
+Accepted image types are JPEG, PNG, and WebP. The endpoint currently returns
+deterministic mock recognition output.
+
+Conversation history is stored in local SQLite by default:
+
+```text
+POST /api/v1/conversations
+GET  /api/v1/conversations
+GET  /api/v1/conversations/{conversation_id}
+POST /api/v1/conversations/{conversation_id}/messages
+DELETE /api/v1/conversations/{conversation_id}
+```
+
+The list endpoint returns newest conversations first with a `message_count`.
+Deleting a conversation also deletes its messages.
+
+Set `SIGNBRIDGE_DATABASE_URL` to use another SQLAlchemy-supported database.
+
 Run the backend tests with:
 
 ```powershell
